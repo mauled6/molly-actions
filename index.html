@@ -446,7 +446,7 @@ async function syncDrive() {
       ? `Google Drive search found these recent Gemini note files (last 3 months): ${driveFiles.map(f=>`"${f.name}" (id: ${f.id})`).join(', ')}. Use the Google Drive MCP tool to read each file and extract action items for Molly Durham.`
       : `Use the Google Drive MCP tool to search for files matching: title contains 'Notes by Gemini' and fullText contains 'Molly Durham' and modifiedTime after ${cutoff}. Then read each file found.`;
 
-    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+    const resp = await fetch('/api/proxy', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'anthropic-beta': 'mcp-client-2025-04-04' },
       body: JSON.stringify({
