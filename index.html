@@ -1,0 +1,845 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>My Action Items · Firstbase</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #ffffff;
+    --bg2: #f6f5f2;
+    --bg3: #efefeb;
+    --text: #1a1a18;
+    --text2: #6b6b67;
+    --text3: #9e9e99;
+    --border: rgba(0,0,0,0.1);
+    --border2: rgba(0,0,0,0.18);
+    --success-bg: #eaf3de;
+    --success-border: #639922;
+    --success-text: #3b6d11;
+    --info-bg: #e6f1fb;
+    --info-text: #185fa5;
+    --info-border: #85b7eb;
+    --radius: 8px;
+    --radius-lg: 12px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1c1c1a;
+      --bg2: #252523;
+      --bg3: #2e2e2b;
+      --text: #f0efe8;
+      --text2: #a8a8a2;
+      --text3: #6e6e68;
+      --border: rgba(255,255,255,0.1);
+      --border2: rgba(255,255,255,0.18);
+      --success-bg: #173404;
+      --success-border: #3b6d11;
+      --success-text: #97c459;
+      --info-bg: #042c53;
+      --info-text: #85b7eb;
+      --info-border: #185fa5;
+    }
+  }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    background: var(--bg3);
+    color: var(--text);
+    min-height: 100vh;
+    padding: 24px 16px 48px;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+
+  .app {
+    max-width: 720px;
+    margin: 0 auto;
+  }
+
+  /* Setup screen */
+  .setup-card {
+    background: var(--bg);
+    border: 0.5px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 32px;
+    margin-top: 48px;
+  }
+  .setup-card h1 { font-size: 20px; font-weight: 600; margin-bottom: 6px; }
+  .setup-card p { font-size: 13px; color: var(--text2); margin-bottom: 24px; line-height: 1.6; }
+  .field { margin-bottom: 16px; }
+  .field label { display: block; font-size: 12px; font-weight: 500; color: var(--text2); margin-bottom: 6px; }
+  .field input {
+    width: 100%; padding: 9px 12px; border-radius: var(--radius);
+    border: 0.5px solid var(--border2); background: var(--bg2);
+    color: var(--text); font-size: 13px; outline: none;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+  }
+  .field input:focus { border-color: var(--info-border); }
+  .field .hint { font-size: 11px; color: var(--text3); margin-top: 4px; }
+  .field .hint a { color: var(--info-text); text-decoration: none; }
+  .field .hint a:hover { text-decoration: underline; }
+
+  .btn-primary {
+    width: 100%; padding: 10px; border-radius: var(--radius);
+    background: var(--text); color: var(--bg);
+    border: none; font-size: 14px; font-weight: 500; cursor: pointer;
+    margin-top: 8px; transition: opacity 0.15s;
+  }
+  .btn-primary:hover { opacity: 0.85; }
+  .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  /* Header */
+  .header {
+    display: flex; align-items: center; justify-content: space-between;
+    background: var(--bg); border: 0.5px solid var(--border);
+    border-radius: var(--radius-lg); padding: 14px 18px;
+    margin-bottom: 16px;
+  }
+  .header-left { display: flex; align-items: center; gap: 12px; }
+  .avatar {
+    width: 36px; height: 36px; border-radius: 50%;
+    background: var(--info-bg); color: var(--info-text);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 13px; font-weight: 600; flex-shrink: 0;
+  }
+  .header h1 { font-size: 15px; font-weight: 600; }
+  .header p { font-size: 11px; color: var(--text3); }
+  .header-btns { display: flex; gap: 8px; align-items: center; }
+  .btn-sm {
+    font-size: 12px; padding: 6px 12px; border-radius: var(--radius);
+    border: 0.5px solid var(--border2); background: var(--bg2);
+    color: var(--text2); cursor: pointer; white-space: nowrap;
+    transition: all 0.15s; display: flex; align-items: center; gap: 5px;
+  }
+  .btn-sm:hover { background: var(--bg3); color: var(--text); }
+  .btn-sm.loading { opacity: 0.6; pointer-events: none; }
+  .btn-sm.primary { background: var(--text); color: var(--bg); border-color: transparent; }
+  .btn-sm.primary:hover { opacity: 0.85; }
+
+  .spinner {
+    width: 12px; height: 12px; border-radius: 50%;
+    border: 1.5px solid var(--border2); border-top-color: var(--text2);
+    animation: spin 0.7s linear infinite; display: inline-block;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Nav */
+  .nav-tabs {
+    display: flex; background: var(--bg); border: 0.5px solid var(--border);
+    border-radius: var(--radius-lg); padding: 4px; margin-bottom: 16px; gap: 2px;
+  }
+  .nav-tab {
+    flex: 1; font-size: 12px; padding: 7px 10px; border-radius: 8px;
+    cursor: pointer; color: var(--text2); text-align: center;
+    transition: all 0.15s; user-select: none; display: flex;
+    align-items: center; justify-content: center; gap: 6px;
+  }
+  .nav-tab.active { background: var(--bg3); color: var(--text); font-weight: 500; }
+  .nav-tab:hover:not(.active) { background: var(--bg2); }
+  .badge {
+    font-size: 10px; padding: 1px 6px; border-radius: 20px;
+    background: var(--bg2); color: var(--text3);
+  }
+  .nav-tab.active .badge { background: var(--bg); }
+
+  /* Week picker */
+  .section-card {
+    background: var(--bg); border: 0.5px solid var(--border);
+    border-radius: var(--radius-lg); padding: 16px 18px; margin-bottom: 12px;
+  }
+  .week-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+  .week-tab {
+    font-size: 11px; padding: 4px 10px; border-radius: 20px; cursor: pointer;
+    border: 0.5px solid var(--border); background: var(--bg2);
+    color: var(--text2); transition: all 0.15s; user-select: none; white-space: nowrap;
+  }
+  .week-tab.active { background: var(--text); color: var(--bg); border-color: transparent; font-weight: 500; }
+  .week-tab:hover:not(.active) { border-color: var(--border2); }
+  .week-tab.all { color: var(--text3); font-style: italic; }
+
+  .date-note { font-size: 11px; color: var(--text3); margin-bottom: 6px; display: flex; align-items: center; gap: 5px; }
+  .date-note::before { content: ''; width: 5px; height: 5px; border-radius: 50%; background: var(--border2); flex-shrink: 0; display: inline-block; }
+  .sel-label { font-size: 11px; color: var(--text2); }
+  .sel-label strong { color: var(--text); }
+
+  /* Stats */
+  .stats-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 12px; }
+  .stat-card { background: var(--bg); border: 0.5px solid var(--border); border-radius: var(--radius-lg); padding: 14px 16px; }
+  .stat-label { font-size: 11px; color: var(--text3); margin-bottom: 4px; }
+  .stat-value { font-size: 24px; font-weight: 600; }
+  .prog-wrap { height: 3px; background: var(--bg3); border-radius: 4px; overflow: hidden; margin-top: 8px; }
+  .prog-bar { height: 100%; border-radius: 4px; background: var(--success-border); transition: width 0.4s; }
+
+  /* Actions */
+  .cat-section { margin-bottom: 12px; }
+  .cat-head {
+    display: flex; align-items: center; gap: 8px; padding: 8px 0;
+    cursor: pointer; user-select: none;
+  }
+  .cat-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+  .cat-name { font-size: 12px; font-weight: 600; color: var(--text); }
+  .cat-count { font-size: 10px; color: var(--text3); background: var(--bg3); padding: 1px 7px; border-radius: 20px; margin-left: auto; }
+  .cat-chev { font-size: 9px; color: var(--text3); transition: transform 0.2s; }
+  .cat-chev.closed { transform: rotate(-90deg); }
+
+  .action-list { display: flex; flex-direction: column; gap: 5px; }
+  .action-card {
+    background: var(--bg); border: 0.5px solid var(--border);
+    border-radius: var(--radius); padding: 10px 12px;
+    display: flex; align-items: flex-start; gap: 10px;
+    transition: border-color 0.15s;
+  }
+  .action-card:hover { border-color: var(--border2); }
+  .action-card.done { opacity: 0.45; }
+  .action-card.done .action-text { text-decoration: line-through; color: var(--text2); }
+
+  .chk {
+    width: 16px; height: 16px; border-radius: 4px; flex-shrink: 0;
+    border: 1.5px solid var(--border2); cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    margin-top: 1px; background: var(--bg); transition: all 0.15s;
+  }
+  .chk.on { background: var(--success-bg); border-color: var(--success-border); }
+  .chk.on::after { content: ''; width: 8px; height: 5px; border-left: 1.5px solid var(--success-text); border-bottom: 1.5px solid var(--success-text); transform: rotate(-45deg) translateY(-1px); display: block; }
+
+  .action-body { flex: 1; min-width: 0; }
+  .action-text { font-size: 13px; color: var(--text); line-height: 1.45; }
+  .action-meta { font-size: 11px; color: var(--text3); margin-top: 4px; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+  .pill { font-size: 10px; padding: 1px 7px; border-radius: 20px; border: 0.5px solid var(--border); color: var(--text2); white-space: nowrap; }
+  .pill.week { background: var(--bg2); border-color: transparent; }
+  .pill.assignee { background: var(--info-bg); color: var(--info-text); border-color: var(--info-border); cursor: pointer; }
+  .pill.assignee:hover { opacity: 0.8; }
+
+  .assign-btn {
+    font-size: 10px; padding: 2px 8px; border-radius: 20px;
+    border: 0.5px solid var(--border); color: var(--text3);
+    background: transparent; cursor: pointer; transition: all 0.15s;
+  }
+  .assign-btn:hover { border-color: var(--border2); color: var(--text2); }
+
+  /* Popover */
+  .pop-backdrop { position: fixed; inset: 0; z-index: 50; }
+  .pop-box {
+    position: fixed; z-index: 51; width: 240px;
+    background: var(--bg); border: 0.5px solid var(--border2);
+    border-radius: var(--radius-lg); padding: 12px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+  }
+  .pop-title { font-size: 11px; font-weight: 500; color: var(--text2); margin-bottom: 8px; }
+  .pop-input {
+    width: 100%; font-size: 12px; padding: 7px 10px;
+    border-radius: var(--radius); border: 0.5px solid var(--border2);
+    background: var(--bg2); color: var(--text); margin-bottom: 6px; outline: none;
+  }
+  .pop-input:focus { border-color: var(--info-border); }
+  .person-list { max-height: 180px; overflow-y: auto; display: flex; flex-direction: column; gap: 1px; }
+  .person-opt {
+    font-size: 12px; padding: 6px 8px; border-radius: 6px;
+    cursor: pointer; display: flex; align-items: center; gap: 8px; color: var(--text);
+  }
+  .person-opt:hover { background: var(--bg2); }
+  .av-sm {
+    width: 22px; height: 22px; border-radius: 50%; background: var(--info-bg);
+    color: var(--info-text); display: flex; align-items: center; justify-content: center;
+    font-size: 9px; font-weight: 600; flex-shrink: 0;
+  }
+  .pop-divider { border: none; border-top: 0.5px solid var(--border); margin: 8px 0; }
+  .pop-custom { display: flex; gap: 6px; margin-top: 6px; }
+  .pop-custom input { flex: 1; font-size: 12px; padding: 6px 8px; border-radius: var(--radius); border: 0.5px solid var(--border2); background: var(--bg2); color: var(--text); outline: none; }
+  .pop-custom button { font-size: 11px; padding: 6px 10px; border-radius: var(--radius); border: 0.5px solid var(--border2); background: var(--bg2); color: var(--text); cursor: pointer; white-space: nowrap; }
+  .pop-custom button:hover { background: var(--bg3); }
+
+  /* Log */
+  .log-week { margin-bottom: 20px; }
+  .log-week-label { font-size: 10px; font-weight: 600; color: var(--text3); text-transform: uppercase; letter-spacing: 0.08em; padding-bottom: 8px; border-bottom: 0.5px solid var(--border); margin-bottom: 8px; }
+  .restore-btn { font-size: 10px; padding: 2px 8px; border-radius: 20px; cursor: pointer; border: 0.5px solid var(--border); color: var(--text3); background: transparent; margin-left: auto; flex-shrink: 0; }
+  .restore-btn:hover { border-color: var(--border2); color: var(--text2); }
+  .done-on { font-size: 10px; color: var(--text3); }
+
+  /* Status bar */
+  .status-bar {
+    font-size: 11px; color: var(--text3); text-align: center;
+    padding: 12px; margin-top: 8px;
+  }
+  .status-bar.error { color: #e24b4a; }
+
+  .empty { text-align: center; padding: 32px; color: var(--text3); font-size: 13px; }
+
+  /* Sync status */
+  .sync-info { font-size: 11px; color: var(--text3); display: flex; align-items: center; gap: 5px; }
+  .sync-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--success-border); flex-shrink: 0; }
+  .sync-dot.stale { background: var(--text3); }
+  .sync-dot.syncing { background: #BA7517; animation: pulse 1s ease-in-out infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+
+  .settings-link { font-size: 11px; color: var(--text3); cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+  .settings-link:hover { color: var(--text2); }
+
+  @media (max-width: 500px) {
+    .stats-row { grid-template-columns: repeat(2, 1fr); }
+    body { padding: 12px 10px 32px; }
+  }
+</style>
+</head>
+<body>
+<div class="app" id="app">
+  <div id="root"></div>
+</div>
+
+<script>
+// ─── Constants ───────────────────────────────────────────────────────────────
+const TEAM = [
+  "Robert Pridgen","Jerrick Neria","Olu Ajani","Paige Osborne",
+  "Christy Carleton","Matt Kennedy","Abdullah Aldeghaither","Eldad Balas",
+  "Ashwin Basu","Neil Fennerty","Ahmad Zakaria","Bruce Warnford-Davis",
+  "Samad Majidi","Adil Khan","Zohair Shabbir","Nikita Oliver","Tejas Patil",
+  "Josh Coleman","Paige Luetkemeyer","Susan Munro"
+];
+
+const CATS = {
+  "India Operations":       { color:"#1D9E75", kw:["india","cloudflare","geotus","geodis","gotus","chalan","bangalore"] },
+  "Vendor & Partners":      { color:"#378ADD", kw:["vendor","true log","trolog","israel","unison","qbr","partner","atrium","prenuvo","spoton","singapore"] },
+  "Documentation & SOPs":   { color:"#BA7517", kw:["document","sop","process","policy","macro","template","update doc","review","modify","edit"] },
+  "Team & People":          { color:"#D4537E", kw:["robert","jerrick","olu","goals","1x1","performance","schedule","budget","travel","draft","job goals"] },
+  "Product & Platform":     { color:"#7F77DD", kw:["platform","retool","jira","serial","imei","configurator","sku","rate card","m5","neo","charger","abm","billing"] },
+  "Operations & Logistics": { color:"#639922", kw:["warehouse","shipment","order","return","transfer","pilot","inventory","csm","loss","lit","kpi","metrics","data","analysis","wbr","volume"] },
+};
+
+const FALLBACK = [
+  { date:"2026-05-07", meeting:"HW & Logistics",      detail:"Review and update existing documentation for return processes and policies." },
+  { date:"2026-05-07", meeting:"HW & Logistics",      detail:"Document which warehouses use configurator and which lock types are handled in the warehouse table file." },
+  { date:"2026-05-07", meeting:"HW & Logistics",      detail:"Send Ahmad the specific examples of shipment status discrepancies found between the dashboard and carriers." },
+  { date:"2026-05-05", meeting:"Weekly Staff Meeting", detail:"Complete the Cloudflare transfer this week for India operations." },
+  { date:"2026-05-05", meeting:"Weekly Staff Meeting", detail:"Chat with Matt Kennedy to decide if the unengaged pilot participant (UiPath) should be removed from the India pilot." },
+  { date:"2026-05-05", meeting:"Bob / Molly 1x1",     detail:"Repull volume data from WBR to check customer order profiles and current numbers." },
+  { date:"2026-05-05", meeting:"Bob / Molly 1x1",     detail:"Give Robert Pridgen recent customer tickets detailing reported returns issues." },
+  { date:"2026-05-05", meeting:"Bob / Molly 1x1",     detail:"Give Robert Pridgen the Standard Operating Procedure document used by partners for returns." },
+  { date:"2026-04-28", meeting:"Bob / Molly 1x1",     detail:"Draft Robert's official job goals list; target completion in a few weeks." },
+  { date:"2026-04-28", meeting:"Bob / Molly 1x1",     detail:"Check budget availability for Robert Pridgen's extended Salt Lake travel through Thursday." },
+  { date:"2026-04-28", meeting:"Jerrick / Molly 1x1", detail:"Convert the Replicant device data from Excel to a Google Sheet and send to Jerrick Neria." },
+  { date:"2026-04-28", meeting:"Jerrick / Molly 1x1", detail:"Track US versus Rest of World discrepancies in lost in transit documentation." },
+  { date:"2026-04-28", meeting:"Jerrick / Molly 1x1", detail:"Find the file containing Whiz retrieval volume numbers in the direct messages." },
+  { date:"2026-04-28", meeting:"Jerrick / Molly 1x1", detail:"Add Jerrick Neria as an optional attendee to the upcoming Whiz retrieval sync meeting." },
+  { date:"2026-04-28", meeting:"Jerrick / Molly 1x1", detail:"Add Jerrick Neria to the existing DM thread regarding the 800 Carta device replacements." },
+  { date:"2026-04-13", meeting:"LIT Process Review",  detail:"Edit the SOP to include caveats for loss, theft, or damage beyond usability." },
+  { date:"2026-04-13", meeting:"LIT Process Review",  detail:"Check if CX team proactively handles suspected UPS losses in the US." },
+  { date:"2026-04-13", meeting:"LIT Process Review",  detail:"Define the process for US orders not delivered within the Service Level Objective timeframe." },
+  { date:"2026-04-13", meeting:"LIT Process Review",  detail:"Confirm with Susan if the device depreciation matrix applies solely to computers." },
+  { date:"2026-04-13", meeting:"LIT Process Review",  detail:"Develop customer communications explaining HOS devices archived due to loss and cessation of monthly billing." },
+  { date:"2026-04-13", meeting:"LIT Process Review",  detail:"Check the document to ensure the URL for the Finance billing sheet is correct." },
+  { date:"2026-04-13", meeting:"LIT Process Review",  detail:"Outline steps for handling a device that is located after the loss credit has been provided." },
+  { date:"2026-04-13", meeting:"LIT Process Review",  detail:"Request details from Abdullah regarding the codebase triggers for a billing event completion." },
+  { date:"2026-04-13", meeting:"LIT Process Review",  detail:"Review all current macros together with Paige." },
+  { date:"2026-04-07", meeting:"EU M5/Neo Workshop",  detail:"Create a Change Management Request for Geotus to modify return processing flow for M5 and Neo devices to stop automatic charger replacement." },
+  { date:"2026-04-07", meeting:"EU M5/Neo Workshop",  detail:"Send data examples to Abdullah showing how adding unexpected items breaks current metrics and WBR data logic." },
+  { date:"2026-03-31", meeting:"Truelog IN Strategy", detail:"Contact Marina to add Robert Pridgen to the Geotus meeting invite." },
+  { date:"2026-03-31", meeting:"Truelog IN Strategy", detail:"Start conversation with Josh regarding Singapore operations setup." },
+  { date:"2026-03-31", meeting:"Truelog IN Strategy", detail:"Schedule initial call with Iben and Lewis to discuss True Log strategy." },
+];
+
+// ─── Storage ─────────────────────────────────────────────────────────────────
+const LS = {
+  get: (k, def) => { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : def; } catch { return def; } },
+  set: (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} }
+};
+
+// ─── State ───────────────────────────────────────────────────────────────────
+let state = {
+  view: 'open',
+  allData: {},
+  weekKeys: [],
+  selectedWeeks: new Set(),
+  collapsedCats: new Set(),
+  justDone: new Set(),
+  delegations: LS.get('md_delegations', {}),
+  persistDone: LS.get('md_persistDone', []),
+  sourceItems: FALLBACK,
+  lastSync: LS.get('md_lastSync', null),
+  syncStatus: 'idle', // idle | syncing | ok | error
+  syncMsg: '',
+  popover: null, // { id, x, y }
+  setupMode: !LS.get('md_anthropicKey', '') && !LS.get('md_driveKey', ''),
+};
+
+function save() {
+  LS.set('md_delegations', state.delegations);
+  LS.set('md_persistDone', state.persistDone);
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+function makeId(item) { return (item.date+'-'+item.meeting+'-'+item.detail).replace(/\W/g,'_').slice(0,80); }
+function weekKey(ds) {
+  const d = new Date(ds+'T00:00:00'), day = d.getDay();
+  return new Date(new Date(ds+'T00:00:00').setDate(d.getDate()-day+(day===0?-6:1))).toISOString().split('T')[0];
+}
+function weekLabel(wk) {
+  const d = new Date(wk+'T00:00:00'), sun = new Date(d); sun.setDate(d.getDate()+6);
+  const o = {month:'short',day:'numeric'};
+  return d.toLocaleDateString('en-US',o)+' – '+sun.toLocaleDateString('en-US',o);
+}
+function categorize(t) {
+  const l = t.toLowerCase();
+  for (const [cat,cfg] of Object.entries(CATS)) if (cfg.kw.some(k=>l.includes(k))) return cat;
+  return "Operations & Logistics";
+}
+function initials(n) { return n.split(' ').map(p=>p[0]).join('').slice(0,2).toUpperCase(); }
+function fmtDate(ts) { return new Date(ts).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'}); }
+function fmtTime(ts) {
+  if (!ts) return 'Never';
+  const d = new Date(ts), now = new Date();
+  const diff = Math.floor((now-d)/60000);
+  if (diff < 1) return 'Just now';
+  if (diff < 60) return diff+'m ago';
+  if (diff < 1440) return Math.floor(diff/60)+'h ago';
+  return fmtDate(ts);
+}
+
+const threeMonthsAgo = (() => { const d = new Date('2026-05-07'); d.setMonth(d.getMonth()-3); return d; })();
+
+function buildAllData() {
+  state.allData = {};
+  const persistIds = new Set(state.persistDone.map(p=>p.id));
+  state.justDone = new Set();
+  const filtered = state.sourceItems.filter(item => new Date(item.date+'T00:00:00') >= threeMonthsAgo);
+  for (const item of filtered) {
+    if (persistIds.has(makeId(item))) continue;
+    const wk = weekKey(item.date);
+    if (!state.allData[wk]) state.allData[wk] = [];
+    state.allData[wk].push({ ...item, id:makeId(item), category:categorize(item.detail), weekKey:wk });
+  }
+  state.weekKeys = Object.keys(state.allData).sort((a,b)=>b.localeCompare(a));
+  if (!state.weekKeys.some(wk=>state.selectedWeeks.has(wk))) {
+    state.selectedWeeks = new Set([state.weekKeys[0]||'']);
+  }
+}
+
+// ─── Sync ─────────────────────────────────────────────────────────────────────
+async function syncDrive() {
+  const apiKey = LS.get('md_anthropicKey', '');
+  const driveKey = LS.get('md_driveKey', '');
+  if (!apiKey) { alert('Please add your Anthropic API key in Settings first.'); return; }
+
+  state.syncStatus = 'syncing'; state.syncMsg = ''; render();
+
+  try {
+    // Build a date cutoff string for the query
+    const cutoff = threeMonthsAgo.toISOString().split('T')[0];
+
+    // Step 1: use Drive API key to search for Gemini note files
+    let driveFiles = [];
+    if (driveKey) {
+      const q = encodeURIComponent(`title contains 'Notes by Gemini' and fullText contains 'Molly Durham' and modifiedTime > '${cutoff}T00:00:00Z'`);
+      const url = `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,modifiedTime)&pageSize=30&key=${driveKey}`;
+      const resp = await fetch(url);
+      if (resp.ok) {
+        const data = await resp.json();
+        driveFiles = data.files || [];
+      }
+    }
+
+    // Step 2: Send file list + request to Claude to extract Molly's action items
+    const fileContext = driveFiles.length
+      ? `Google Drive search found these recent Gemini note files (last 3 months): ${driveFiles.map(f=>`"${f.name}" (id: ${f.id})`).join(', ')}. Use the Google Drive MCP tool to read each file and extract action items for Molly Durham.`
+      : `Use the Google Drive MCP tool to search for files matching: title contains 'Notes by Gemini' and fullText contains 'Molly Durham' and modifiedTime after ${cutoff}. Then read each file found.`;
+
+    const resp = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'anthropic-beta': 'mcp-client-2025-04-04' },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 4000,
+        system: `You extract action items assigned to Molly Durham from Google Drive Gemini meeting notes. 
+Return ONLY a valid JSON array. No markdown, no explanation, no code fences. 
+Each object: {"date":"YYYY-MM-DD","meeting":"Meeting Name","detail":"Full action text as written"}
+Only include items explicitly assigned to [Molly Durham] in the Next steps section. Do not include items owned by others.`,
+        messages: [{ role: 'user', content: fileContext }],
+        mcp_servers: [{ type: 'url', url: 'https://drivemcp.googleapis.com/mcp/v1', name: 'google-drive' }]
+      })
+    });
+
+    if (!resp.ok) {
+      const err = await resp.json().catch(()=>({}));
+      throw new Error(err.error?.message || `API error ${resp.status}`);
+    }
+
+    const data = await resp.json();
+    const text = (data.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('');
+    const match = text.match(/\[[\s\S]*\]/);
+    if (!match) throw new Error('No action items found in response');
+    const items = JSON.parse(match[0]);
+    if (!Array.isArray(items) || !items.length) throw new Error('Empty result from Drive');
+
+    state.sourceItems = items;
+    state.lastSync = Date.now();
+    LS.set('md_lastSync', state.lastSync);
+    LS.set('md_sourceItems', items);
+    state.syncStatus = 'ok';
+    state.syncMsg = `Synced ${items.length} action items from ${driveFiles.length || '?'} meeting notes`;
+    buildAllData(); render();
+  } catch (err) {
+    state.syncStatus = 'error';
+    state.syncMsg = err.message;
+    render();
+  }
+}
+
+function applyRefresh() {
+  // Move justDone into persistDone log
+  for (const id of state.justDone) {
+    if (!state.persistDone.find(p=>p.id===id)) {
+      const item = Object.values(state.allData).flat().find(i=>i.id===id);
+      if (item) state.persistDone.push({
+        id, detail:item.detail, meeting:item.meeting, date:item.date,
+        weekKey:item.weekKey, doneAt:Date.now(),
+        assignee: state.delegations[id]||null
+      });
+    }
+  }
+  save(); buildAllData(); render();
+}
+
+// ─── Actions ─────────────────────────────────────────────────────────────────
+function checkItem(id) { state.justDone.add(id); render(); }
+function uncheckItem(id) { state.justDone.delete(id); render(); }
+function undoLog(id) { state.persistDone = state.persistDone.filter(p=>p.id!==id); save(); buildAllData(); render(); }
+function toggleWeek(wk) { if(state.selectedWeeks.has(wk)){if(state.selectedWeeks.size===1)return;state.selectedWeeks.delete(wk);}else state.selectedWeeks.add(wk); render(); }
+function selectAllWeeks() { state.weekKeys.forEach(wk=>state.selectedWeeks.add(wk)); render(); }
+function toggleCat(cat) { if(state.collapsedCats.has(cat))state.collapsedCats.delete(cat);else state.collapsedCats.add(cat); render(); }
+function switchView(v) { state.view=v; render(); }
+
+function openPopover(id, btnEl) {
+  if (state.popover && state.popover.id===id) { state.popover=null; render(); return; }
+  const rect = btnEl.getBoundingClientRect();
+  state.popover = { id, x: Math.min(rect.left, window.innerWidth-256), y: rect.bottom+6 };
+  render();
+}
+function closePopover() { state.popover=null; render(); }
+function setDelegate(id, name) {
+  if (name) state.delegations[id]=name; else delete state.delegations[id];
+  save(); state.popover=null; render();
+}
+function assignCustom(id) {
+  const v = document.getElementById('pop-custom-input')?.value?.trim();
+  if (v) setDelegate(id, v);
+}
+
+function saveKeys() {
+  const ak = document.getElementById('setup-ak')?.value?.trim();
+  const dk = document.getElementById('setup-dk')?.value?.trim();
+  if (!ak) { alert('Anthropic API key is required.'); return; }
+  LS.set('md_anthropicKey', ak);
+  if (dk) LS.set('md_driveKey', dk);
+  state.setupMode = false;
+  // Restore cached source items if any
+  const cached = LS.get('md_sourceItems', null);
+  if (cached) state.sourceItems = cached;
+  buildAllData(); render();
+}
+
+function openSettings() {
+  const ak = LS.get('md_anthropicKey','');
+  const dk = LS.get('md_driveKey','');
+  const newAk = prompt('Anthropic API Key (leave blank to keep current):', '');
+  if (newAk !== null && newAk.trim()) LS.set('md_anthropicKey', newAk.trim());
+  const newDk = prompt('Google Drive API Key (optional, leave blank to keep current):', '');
+  if (newDk !== null && newDk.trim()) LS.set('md_driveKey', newDk.trim());
+  render();
+}
+
+// ─── Render ──────────────────────────────────────────────────────────────────
+function render() {
+  const root = document.getElementById('root');
+  if (state.setupMode) { root.innerHTML = renderSetup(); return; }
+  root.innerHTML = renderApp();
+  // re-attach popover search listener
+  const psearch = document.getElementById('pop-search');
+  if (psearch) psearch.addEventListener('input', filterPopover);
+}
+
+function filterPopover() {
+  const q = document.getElementById('pop-search')?.value?.toLowerCase()||'';
+  document.querySelectorAll('.person-opt[data-name]').forEach(el => {
+    el.style.display = el.dataset.name.toLowerCase().includes(q) ? '' : 'none';
+  });
+}
+
+function renderSetup() {
+  return `
+    <div class="setup-card">
+      <h1>My Action Items</h1>
+      <p>Enter your API keys to get started. These are stored only in your browser and never sent anywhere except the respective APIs.</p>
+      <div class="field">
+        <label>Anthropic API Key <span style="color:#e24b4a">*</span></label>
+        <input type="password" id="setup-ak" placeholder="sk-ant-..." autocomplete="off" />
+        <div class="hint">Get yours at <a href="https://console.anthropic.com" target="_blank">console.anthropic.com</a> → API Keys</div>
+      </div>
+      <div class="field">
+        <label>Google Drive API Key <span style="color:var(--text3)">(optional — enables faster sync)</span></label>
+        <input type="password" id="setup-dk" placeholder="AIza..." autocomplete="off" />
+        <div class="hint">
+          <a href="https://console.cloud.google.com" target="_blank">console.cloud.google.com</a> → APIs & Services → Credentials → Create API Key → restrict to Drive API.<br>
+          Without this, sync still works via Claude but is slightly slower.
+        </div>
+      </div>
+      <button class="btn-primary" onclick="saveKeys()">Get started</button>
+    </div>`;
+}
+
+function renderApp() {
+  const visibleItems = state.weekKeys.filter(wk=>state.selectedWeeks.has(wk)).flatMap(wk=>state.allData[wk]||[]);
+  const openItems = visibleItems.filter(i=>!state.justDone.has(i.id)&&!state.delegations[i.id]);
+  const delegatedItems = visibleItems.filter(i=>!state.justDone.has(i.id)&&!!state.delegations[i.id]);
+  const doneSession = visibleItems.filter(i=>state.justDone.has(i.id));
+
+  const openCount = openItems.length;
+  const delCount = delegatedItems.length;
+  const logCount = state.persistDone.length;
+
+  const syncDot = state.syncStatus==='syncing'?'syncing':state.lastSync?'':'stale';
+
+  let html = `
+    <div class="header">
+      <div class="header-left">
+        <div class="avatar">MD</div>
+        <div>
+          <h1>My action items</h1>
+          <p>Firstbase · Gemini meeting notes</p>
+        </div>
+      </div>
+      <div class="header-btns">
+        <div class="sync-info">
+          <div class="sync-dot ${syncDot}"></div>
+          <span>${state.syncStatus==='syncing'?'Syncing…':state.lastSync?'Last sync: '+fmtTime(state.lastSync):'Not yet synced'}</span>
+        </div>
+        <button class="btn-sm ${state.syncStatus==='syncing'?'loading':''}" onclick="syncDrive()">
+          ${state.syncStatus==='syncing'?'<div class="spinner"></div>':'↻'} Sync Drive
+        </button>
+        <button class="btn-sm primary" onclick="applyRefresh()">↻ Refresh view</button>
+        <button class="btn-sm" onclick="openSettings()" title="Settings">⚙</button>
+      </div>
+    </div>`;
+
+  if (state.syncStatus==='error') {
+    html += `<div class="status-bar error">Sync error: ${state.syncMsg} — showing cached data.</div>`;
+  } else if (state.syncStatus==='ok' && state.syncMsg) {
+    html += `<div class="status-bar">${state.syncMsg}</div>`;
+  }
+
+  html += `
+    <div class="nav-tabs">
+      <div class="nav-tab ${state.view==='open'?'active':''}" onclick="switchView('open')">Open <span class="badge">${openCount}</span></div>
+      <div class="nav-tab ${state.view==='delegated'?'active':''}" onclick="switchView('delegated')">Delegated <span class="badge">${delCount}</span></div>
+      <div class="nav-tab ${state.view==='log'?'active':''}" onclick="switchView('log')">Completed <span class="badge">${logCount}</span></div>
+    </div>`;
+
+  if (state.view === 'log') { html += renderLog(); }
+  else if (state.view === 'delegated') { html += renderDelegated(delegatedItems); }
+  else { html += renderOpen(visibleItems, openItems, doneSession); }
+
+  if (state.popover) html += renderPopover();
+
+  html += `<div style="text-align:center;margin-top:16px;"><span class="settings-link" onclick="openSettings()">⚙ API settings</span></div>`;
+  return html;
+}
+
+function weekPickerHtml() {
+  const sortedSel = [...state.selectedWeeks].sort((a,b)=>b.localeCompare(a));
+  const selLabel = sortedSel.length===state.weekKeys.length ? 'All weeks'
+    : sortedSel.length===1 ? weekLabel(sortedSel[0])
+    : sortedSel.length+' weeks selected';
+  const cutoff = threeMonthsAgo.toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'});
+  return `
+    <div class="section-card">
+      <div class="date-note">Showing notes from ${cutoff} to today</div>
+      <div class="week-tabs">
+        ${state.weekKeys.map(wk=>`<div class="week-tab ${state.selectedWeeks.has(wk)?'active':''}" onclick="toggleWeek('${wk}')">${weekLabel(wk)}</div>`).join('')}
+        <div class="week-tab all" onclick="selectAllWeeks()">All</div>
+      </div>
+      <div class="sel-label"><strong>${selLabel}</strong></div>
+    </div>`;
+}
+
+function renderOpen(visibleItems, openItems, doneSession) {
+  const total = visibleItems.length;
+  const doneCount = doneSession.length + state.persistDone.filter(p=>
+    state.weekKeys.filter(wk=>state.selectedWeeks.has(wk)).some(wk=>p.weekKey===wk)
+  ).length;
+  const pct = total ? Math.round((doneCount/total)*100) : 0;
+  const multi = state.selectedWeeks.size>1;
+
+  const byCategory = {};
+  for (const item of openItems) { if(!byCategory[item.category])byCategory[item.category]=[]; byCategory[item.category].push(item); }
+
+  let html = weekPickerHtml() + `
+    <div class="stats-row">
+      <div class="stat-card"><div class="stat-label">Total</div><div class="stat-value">${total}</div></div>
+      <div class="stat-card"><div class="stat-label">Completed</div><div class="stat-value">${doneCount}</div></div>
+      <div class="stat-card"><div class="stat-label">Remaining</div><div class="stat-value">${openItems.length}</div></div>
+      <div class="stat-card"><div class="stat-label">Progress</div><div class="stat-value">${pct}%</div><div class="prog-wrap"><div class="prog-bar" style="width:${pct}%"></div></div></div>
+    </div>`;
+
+  if (!openItems.length && !doneSession.length) {
+    html += `<div class="empty">No open actions for the selected weeks.</div>`;
+  } else {
+    for (const [cat,cfg] of Object.entries(CATS)) {
+      if (!byCategory[cat]) continue;
+      const collapsed = state.collapsedCats.has(cat);
+      html += `<div class="cat-section">
+        <div class="cat-head" onclick="toggleCat('${cat}')">
+          <div class="cat-dot" style="background:${cfg.color}"></div>
+          <div class="cat-name">${cat}</div>
+          <div class="cat-count">${byCategory[cat].length}</div>
+          <div class="cat-chev ${collapsed?'closed':''}">▾</div>
+        </div>
+        ${collapsed?'':`<div class="action-list">${byCategory[cat].map(item=>actionCard(item,false,multi)).join('')}</div>`}
+      </div>`;
+    }
+    if (doneSession.length) {
+      const collapsed = state.collapsedCats.has('__done__');
+      html += `<div class="cat-section">
+        <div class="cat-head" onclick="toggleCat('__done__')">
+          <div class="cat-dot" style="background:#999"></div>
+          <div class="cat-name" style="color:var(--text2)">Completed this session</div>
+          <div class="cat-count">${doneSession.length}</div>
+          <div class="cat-chev ${collapsed?'closed':''}">▾</div>
+        </div>
+        ${collapsed?'':`<div class="action-list">${doneSession.map(item=>`
+          <div class="action-card done" onclick="uncheckItem('${item.id}')">
+            <div class="chk on"></div>
+            <div class="action-body">
+              <div class="action-text">${item.detail}</div>
+              <div class="action-meta">
+                <span class="pill">${item.meeting}</span>
+                ${multi?`<span class="pill week">${weekLabel(item.weekKey)}</span>`:''}
+                <span>${item.date}</span>
+              </div>
+            </div>
+          </div>`).join('')}</div>`}
+      </div>`;
+    }
+  }
+  return html;
+}
+
+function actionCard(item, showWeek, multi) {
+  const assignee = state.delegations[item.id];
+  return `
+    <div class="action-card">
+      <div class="chk" onclick="checkItem('${item.id}')"></div>
+      <div class="action-body">
+        <div class="action-text">${item.detail}</div>
+        <div class="action-meta">
+          <span class="pill">${item.meeting}</span>
+          ${(multi||showWeek)?`<span class="pill week">${weekLabel(item.weekKey)}</span>`:''}
+          <span>${item.date}</span>
+          ${assignee
+            ? `<span class="pill assignee" onclick="event.stopPropagation();openPopover('${item.id}',this)">${initials(assignee)} ${assignee} ✕</span>`
+            : `<button class="assign-btn" onclick="event.stopPropagation();openPopover('${item.id}',this)">+ Assign</button>`
+          }
+        </div>
+      </div>
+    </div>`;
+}
+
+function renderDelegated(delegatedItems) {
+  const multi = state.selectedWeeks.size>1;
+  const byAssignee = {};
+  for (const item of delegatedItems) {
+    const a = state.delegations[item.id];
+    if (!byAssignee[a]) byAssignee[a]=[];
+    byAssignee[a].push(item);
+  }
+  let html = weekPickerHtml();
+  if (!delegatedItems.length) {
+    html += `<div class="empty">No delegated actions for the selected weeks.<br>Hit "+ Assign" on any open action to delegate it.</div>`;
+    return html;
+  }
+  for (const [assignee, items] of Object.entries(byAssignee).sort()) {
+    html += `<div class="log-week">
+      <div class="log-week-label" style="display:flex;align-items:center;gap:8px;">
+        <div class="av-sm">${initials(assignee)}</div>
+        ${assignee} · ${items.length} item${items.length!==1?'s':''}
+      </div>
+      <div class="action-list">${items.map(item=>actionCard(item,true,multi)).join('')}</div>
+    </div>`;
+  }
+  return html;
+}
+
+function renderLog() {
+  if (!state.persistDone.length) return `<div class="empty">No completed actions yet.<br>Check items off and hit "Refresh view" to log them here.</div>`;
+  const byWeek = {};
+  for (const item of [...state.persistDone].sort((a,b)=>b.doneAt-a.doneAt)) {
+    const wk = weekKey(new Date(item.doneAt).toISOString().split('T')[0]);
+    if (!byWeek[wk]) byWeek[wk]=[];
+    byWeek[wk].push(item);
+  }
+  let html = `<div class="date-note" style="margin-bottom:12px;">${state.persistDone.length} action${state.persistDone.length!==1?'s':''} completed · click Restore to reopen</div>`;
+  for (const [wk,items] of Object.entries(byWeek).sort((a,b)=>b[0].localeCompare(a[0]))) {
+    html += `<div class="log-week">
+      <div class="log-week-label">Completed week of ${weekLabel(wk)}</div>
+      <div class="action-list">${items.map(item=>`
+        <div class="action-card done">
+          <div class="chk on"></div>
+          <div class="action-body">
+            <div class="action-text">${item.detail}</div>
+            <div class="action-meta">
+              <span class="pill">${item.meeting}</span>
+              <span class="pill week">${weekLabel(item.weekKey)}</span>
+              ${item.assignee?`<span class="pill assignee" style="cursor:default;">${initials(item.assignee)} ${item.assignee}</span>`:''}
+              <span class="done-on">Completed ${fmtDate(item.doneAt)}</span>
+            </div>
+          </div>
+          <button class="restore-btn" onclick="undoLog('${item.id}')">Restore</button>
+        </div>`).join('')}
+      </div>
+    </div>`;
+  }
+  return html;
+}
+
+function renderPopover() {
+  const {id, x, y} = state.popover;
+  const current = state.delegations[id]||'';
+  return `
+    <div class="pop-backdrop" onclick="closePopover()"></div>
+    <div class="pop-box" style="top:${Math.min(y, window.innerHeight-320)}px;left:${x}px;">
+      <div class="pop-title">Assign to</div>
+      <input class="pop-input" id="pop-search" placeholder="Search team…" autocomplete="off" />
+      <div class="person-list">
+        ${TEAM.map(name=>`
+          <div class="person-opt" data-name="${name}" onclick="setDelegate('${id}','${name}')">
+            <div class="av-sm">${initials(name)}</div>
+            ${name}${name===current?' ✓':''}
+          </div>`).join('')}
+        <div class="person-opt" data-name="remove" onclick="setDelegate('${id}','')">
+          <div class="av-sm" style="background:var(--bg3);color:var(--text3)">—</div>
+          Remove assignee
+        </div>
+      </div>
+      <hr class="pop-divider">
+      <div class="pop-custom">
+        <input id="pop-custom-input" placeholder="Custom name…" />
+        <button onclick="assignCustom('${id}')">Assign</button>
+      </div>
+    </div>`;
+}
+
+// ─── Boot ─────────────────────────────────────────────────────────────────────
+const cachedItems = LS.get('md_sourceItems', null);
+if (cachedItems) state.sourceItems = cachedItems;
+buildAllData();
+render();
+
+window.addEventListener('click', (e) => {
+  if (state.popover && !e.target.closest('.pop-box') && !e.target.closest('.assign-btn') && !e.target.closest('.pill.assignee')) {
+    state.popover = null; render();
+  }
+});
+</script>
+</body>
+</html>
