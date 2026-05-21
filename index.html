@@ -450,7 +450,7 @@ async function syncDrive() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'anthropic-beta': 'mcp-client-2025-04-04' },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-sonnet-4-5',
         max_tokens: 4000,
         system: `You extract action items assigned to Molly Durham from Google Drive Gemini meeting notes. 
 Return ONLY a valid JSON array. No markdown, no explanation, no code fences. 
