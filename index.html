@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>My Action Items · Firstbase</title>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -362,7 +363,7 @@ let state = {
   syncStatus: 'idle', // idle | syncing | ok | error
   syncMsg: '',
   popover: null, // { id, x, y }
-  setupMode: !LS.get('md_anthropicKey', '') && !LS.get('md_driveKey', ''),
+  setupMode: !LS.get('md_anthropicKey', '') && !LS.get('md_googleClientId', ''),
 };
 
 function save() {
@@ -418,46 +419,86 @@ function buildAllData() {
 }
 
 // ─── Sync ─────────────────────────────────────────────────────────────────────
+// Google OAuth
+let googleAccessToken = null;
+
+function getGoogleClientId() { return LS.get('md_googleClientId', ''); }
+
+function signInWithGoogle() {
+  return new Promise((resolve, reject) => {
+    const clientId = getGoogleClientId();
+    if (!clientId) { reject(new Error('No Google Client ID set. Please add it in API Settings.')); return; }
+    const client = google.accounts.oauth2.initTokenClient({
+      client_id: clientId,
+      scope: 'https://www.googleapis.com/auth/drive.readonly',
+      callback: (response) => {
+        if (response.error) { reject(new Error(response.error)); return; }
+        googleAccessToken = response.access_token;
+        resolve(response.access_token);
+      },
+    });
+    client.requestAccessToken();
+  });
+}
+
+async function fetchDriveFiles(accessToken) {
+  const cutoff = threeMonthsAgo.toISOString().split('T')[0];
+  const q = encodeURIComponent(`name contains 'Notes by Gemini' and modifiedTime > '${cutoff}T00:00:00Z' and mimeType = 'application/vnd.google-apps.document'`);
+  const url = `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,modifiedTime)&pageSize=50`;
+  const resp = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+  if (!resp.ok) throw new Error(`Drive API error: ${resp.status}`);
+  const data = await resp.json();
+  return data.files || [];
+}
+
+async function fetchFileContent(fileId, accessToken) {
+  const url = `https://www.googleapis.com/drive/v3/files/${fileId}/export?mimeType=text/plain`;
+  const resp = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+  if (!resp.ok) return '';
+  return await resp.text();
+}
+
 async function syncDrive() {
   const apiKey = LS.get('md_anthropicKey', '');
-  const driveKey = LS.get('md_driveKey', '');
   if (!apiKey) { alert('Please add your Anthropic API key in Settings first.'); return; }
+  if (!getGoogleClientId()) { alert('Please add your Google Client ID in API Settings first.'); return; }
 
   state.syncStatus = 'syncing'; state.syncMsg = ''; render();
 
   try {
-    // Build a date cutoff string for the query
-    const cutoff = threeMonthsAgo.toISOString().split('T')[0];
+    // Step 1: Google OAuth sign-in
+    state.syncMsg = 'Signing in to Google Drive...'; render();
+    const accessToken = await signInWithGoogle();
 
-    // Step 1: use Drive API key to search for Gemini note files
-    let driveFiles = [];
-    if (driveKey) {
-      const q = encodeURIComponent(`title contains 'Notes by Gemini' and fullText contains 'Molly Durham' and modifiedTime > '${cutoff}T00:00:00Z'`);
-      const url = `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,modifiedTime)&pageSize=30&key=${driveKey}`;
-      const resp = await fetch(url);
-      if (resp.ok) {
-        const data = await resp.json();
-        driveFiles = data.files || [];
-      }
-    }
+    // Step 2: Fetch list of Gemini note files
+    state.syncMsg = 'Finding Gemini meeting notes...'; render();
+    const files = await fetchDriveFiles(accessToken);
+    if (!files.length) throw new Error('No Gemini meeting notes found in the last 3 months');
 
-    // Step 2: Send file list + request to Claude to extract Molly's action items
-    const fileContext = driveFiles.length
-      ? `Google Drive search found these recent Gemini note files (last 3 months): ${driveFiles.map(f=>`"${f.name}" (id: ${f.id})`).join(', ')}. Use the Google Drive MCP tool to read each file and extract action items for Molly Durham.`
-      : `Use the Google Drive MCP tool to search for files matching: title contains 'Notes by Gemini' and fullText contains 'Molly Durham' and modifiedTime after ${cutoff}. Then read each file found.`;
+    // Step 3: Read each file content
+    state.syncMsg = `Reading ${files.length} meeting notes...`; render();
+    const fileContents = await Promise.all(
+      files.map(async f => {
+        const text = await fetchFileContent(f.id, accessToken);
+        return { name: f.name, text: text.slice(0, 3000) };
+      })
+    );
+
+    // Step 4: Send to Claude to extract action items
+    state.syncMsg = 'Extracting your action items...'; render();
+    const combinedText = fileContents.map(f => `=== ${f.name} ===\n${f.text}`).join('\n\n');
 
     const resp = await fetch('/api/proxy', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'anthropic-beta': 'mcp-client-2025-04-04' },
+      headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
       body: JSON.stringify({
         model: 'claude-sonnet-4-5',
         max_tokens: 4000,
-        system: `You extract action items assigned to Molly Durham from Google Drive Gemini meeting notes. 
-Return ONLY a valid JSON array. No markdown, no explanation, no code fences. 
+        system: `You extract action items assigned to Molly Durham from Gemini meeting notes.
+Return ONLY a valid JSON array. No markdown, no explanation, no code fences.
 Each object: {"date":"YYYY-MM-DD","meeting":"Meeting Name","detail":"Full action text as written"}
-Only include items explicitly assigned to [Molly Durham] in the Next steps section. Do not include items owned by others.`,
-        messages: [{ role: 'user', content: fileContext }],
-        mcp_servers: [{ type: 'url', url: 'https://drivemcp.googleapis.com/mcp/v1', name: 'google-drive' }]
+Only include items explicitly assigned to Molly Durham. Infer the date from the document name or content.`,
+        messages: [{ role: 'user', content: `Extract all action items assigned to Molly Durham from these meeting notes:\n\n${combinedText}` }]
       })
     });
 
@@ -471,14 +512,14 @@ Only include items explicitly assigned to [Molly Durham] in the Next steps secti
     const match = text.match(/\[[\s\S]*\]/);
     if (!match) throw new Error('No action items found in response');
     const items = JSON.parse(match[0]);
-    if (!Array.isArray(items) || !items.length) throw new Error('Empty result from Drive');
+    if (!Array.isArray(items) || !items.length) throw new Error('No action items found in your meeting notes');
 
     state.sourceItems = items;
     state.lastSync = Date.now();
     LS.set('md_lastSync', state.lastSync);
     LS.set('md_sourceItems', items);
     state.syncStatus = 'ok';
-    state.syncMsg = `Synced ${items.length} action items from ${driveFiles.length || '?'} meeting notes`;
+    state.syncMsg = `Synced ${items.length} action items from ${files.length} meeting notes`;
     buildAllData(); render();
   } catch (err) {
     state.syncStatus = 'error';
@@ -532,7 +573,7 @@ function saveKeys() {
   const dk = document.getElementById('setup-dk')?.value?.trim();
   if (!ak) { alert('Anthropic API key is required.'); return; }
   LS.set('md_anthropicKey', ak);
-  if (dk) LS.set('md_driveKey', dk);
+  if (dk) LS.set('md_googleClientId', dk);
   state.setupMode = false;
   // Restore cached source items if any
   const cached = LS.get('md_sourceItems', null);
@@ -559,8 +600,8 @@ function openSettings() {
           value="${ak ? '••••••••••••' + ak.slice(-4) : ''}" />
       </div>
       <div style="margin-bottom:20px;">
-        <label style="display:block;font-size:11px;font-weight:500;color:var(--text2);margin-bottom:6px;">Google Drive API Key <span style="color:var(--text3)">(optional)</span></label>
-        <input id="modal-dk" type="password" placeholder="AIza..." autocomplete="off"
+        <label style="display:block;font-size:11px;font-weight:500;color:var(--text2);margin-bottom:6px;">Google OAuth Client ID <span style="color:var(--text3)">(required for Sync Drive)</span></label>
+        <input id="modal-dk" type="password" placeholder="123456789-abc.apps.googleusercontent.com" autocomplete="off"
           style="width:100%;padding:9px 12px;border-radius:var(--radius);border:0.5px solid var(--border2);background:var(--bg2);color:var(--text);font-size:13px;font-family:monospace;outline:none;"
           value="${dk ? '••••••••••••' + dk.slice(-4) : ''}" />
       </div>
@@ -583,7 +624,7 @@ function saveSettingsModal() {
   const dk = dkInput?.value?.trim();
   // Only save if it's not the masked placeholder
   if (ak && !ak.startsWith('••••')) LS.set('md_anthropicKey', ak);
-  if (dk && !dk.startsWith('••••')) LS.set('md_driveKey', dk);
+  if (dk && !dk.startsWith('••••')) LS.set('md_googleClientId', dk);
   document.getElementById('settings-modal')?.remove();
   render();
 }
@@ -616,11 +657,10 @@ function renderSetup() {
         <div class="hint">Get yours at <a href="https://console.anthropic.com" target="_blank">console.anthropic.com</a> → API Keys</div>
       </div>
       <div class="field">
-        <label>Google Drive API Key <span style="color:var(--text3)">(optional — enables faster sync)</span></label>
-        <input type="password" id="setup-dk" placeholder="AIza..." autocomplete="off" />
+        <label>Google OAuth Client ID <span style="color:var(--text3)">(required for Sync Drive)</span></label>
+        <input type="password" id="setup-dk" placeholder="123456789-abc.apps.googleusercontent.com" autocomplete="off" />
         <div class="hint">
-          <a href="https://console.cloud.google.com" target="_blank">console.cloud.google.com</a> → APIs & Services → Credentials → Create API Key → restrict to Drive API.<br>
-          Without this, sync still works via Claude but is slightly slower.
+          From <a href="https://console.cloud.google.com" target="_blank">Google Cloud Console</a> → APIs & Services → Credentials → OAuth 2.0 Client ID
         </div>
       </div>
       <button class="btn-primary" onclick="saveKeys()">Get started</button>
