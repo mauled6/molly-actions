@@ -372,7 +372,31 @@ function save() {
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
-function makeId(item) { return (item.date+'-'+item.meeting+'-'+item.detail).replace(/\W/g,'_').slice(0,80); }
+function makeId(item) {
+  // Use meeting name + first 40 chars of detail for a stable ID that survives minor rewording
+  const base = (item.meeting + '-' + item.detail.slice(0, 40)).toLowerCase().replace(/[^a-z0-9]+/g, '_');
+  return base.slice(0, 60);
+}
+
+function findMatchingId(newItem, knownIds) {
+  // Exact match first
+  const exact = makeId(newItem);
+  if (knownIds.has(exact)) return exact;
+  // Fuzzy: match by meeting + any 20-char overlap in detail
+  const newDetail = newItem.detail.toLowerCase();
+  for (const id of knownIds) {
+    const parts = id.split('_');
+    // Check if the meeting name is in the id
+    const meetingSlug = newItem.meeting.toLowerCase().replace(/[^a-z0-9]+/g, '_').slice(0, 20);
+    if (id.startsWith(meetingSlug.slice(0, 10))) {
+      // Check for substantial word overlap
+      const words = newDetail.split(/\s+/).filter(w => w.length > 4);
+      const matchCount = words.filter(w => id.includes(w.replace(/[^a-z0-9]/g, ''))).length;
+      if (matchCount >= 2) return id;
+    }
+  }
+  return exact;
+}
 function weekKey(ds) {
   const d = new Date(ds+'T00:00:00'), day = d.getDay();
   return new Date(new Date(ds+'T00:00:00').setDate(d.getDate()-day+(day===0?-6:1))).toISOString().split('T')[0];
@@ -403,14 +427,29 @@ const threeMonthsAgo = (() => { const d = new Date('2026-05-07'); d.setMonth(d.g
 
 function buildAllData() {
   state.allData = {};
-  const persistIds = new Set(state.persistDone.map(p=>p.id));
   state.justDone = new Set();
+
+  const persistIds = new Set(state.persistDone.map(p=>p.id));
+  const delegationIds = new Set(Object.keys(state.delegations));
+  const allKnownIds = new Set([...persistIds, ...delegationIds]);
+
   const filtered = state.sourceItems.filter(item => new Date(item.date+'T00:00:00') >= threeMonthsAgo);
   for (const item of filtered) {
-    if (persistIds.has(makeId(item))) continue;
+    // Find the best matching stable ID for this item
+    const stableId = findMatchingId(item, allKnownIds) || makeId(item);
+
+    // Migrate delegations if ID has changed
+    const rawId = makeId(item);
+    if (rawId !== stableId && state.delegations[rawId] && !state.delegations[stableId]) {
+      state.delegations[stableId] = state.delegations[rawId];
+      delete state.delegations[rawId];
+      save();
+    }
+
+    if (persistIds.has(stableId)) continue;
     const wk = weekKey(item.date);
     if (!state.allData[wk]) state.allData[wk] = [];
-    state.allData[wk].push({ ...item, id:makeId(item), category:categorize(item.detail), weekKey:wk });
+    state.allData[wk].push({ ...item, id: stableId, category:categorize(item.detail), weekKey:wk });
   }
   state.weekKeys = Object.keys(state.allData).sort((a,b)=>b.localeCompare(a));
   if (!state.weekKeys.some(wk=>state.selectedWeeks.has(wk))) {
