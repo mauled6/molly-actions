@@ -372,30 +372,63 @@ function save() {
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
-function makeId(item) {
-  // Use meeting name + first 40 chars of detail for a stable ID that survives minor rewording
-  const base = (item.meeting + '-' + item.detail.slice(0, 40)).toLowerCase().replace(/[^a-z0-9]+/g, '_');
-  return base.slice(0, 60);
+// ─── Stable ID system ────────────────────────────────────────────────────────
+// IDs are assigned once and stored in a lookup table keyed by a fingerprint.
+// The fingerprint uses meeting + date + key words, so minor rewordings still match.
+// This means completions and delegations survive resyncs even if Claude rewords actions.
+
+function fingerprint(item) {
+  // Extract the 3 most distinctive words (length > 4) from the detail
+  const words = item.detail.toLowerCase()
+    .replace(/[^a-z0-9\s]/g, '')
+    .split(/\s+/)
+    .filter(w => w.length > 4)
+    .slice(0, 3)
+    .sort()
+    .join('_');
+  const mtg = item.meeting.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 15);
+  return (mtg + '_' + item.date + '_' + words).slice(0, 80);
 }
 
-function findMatchingId(newItem, knownIds) {
-  // Exact match first
-  const exact = makeId(newItem);
-  if (knownIds.has(exact)) return exact;
-  // Fuzzy: match by meeting + any 20-char overlap in detail
-  const newDetail = newItem.detail.toLowerCase();
-  for (const id of knownIds) {
-    const parts = id.split('_');
-    // Check if the meeting name is in the id
-    const meetingSlug = newItem.meeting.toLowerCase().replace(/[^a-z0-9]+/g, '_').slice(0, 20);
-    if (id.startsWith(meetingSlug.slice(0, 10))) {
-      // Check for substantial word overlap
-      const words = newDetail.split(/\s+/).filter(w => w.length > 4);
-      const matchCount = words.filter(w => id.includes(w.replace(/[^a-z0-9]/g, ''))).length;
-      if (matchCount >= 2) return id;
+function makeId(item) {
+  // Look up or create a stable ID for this item
+  const fp = fingerprint(item);
+  const idMap = LS.get('md_idMap', {});
+  if (idMap[fp]) return idMap[fp];
+  // Create a new stable ID and store it
+  const newId = fp;
+  idMap[fp] = newId;
+  LS.set('md_idMap', idMap);
+  return newId;
+}
+
+function resolveId(item) {
+  // Try fingerprint lookup first, then fall back to making a new one
+  const fp = fingerprint(item);
+  const idMap = LS.get('md_idMap', {});
+  if (idMap[fp]) return idMap[fp];
+  // Try to find a close match: same meeting + date + at least 2 words overlap
+  const itemWords = new Set(
+    item.detail.toLowerCase().replace(/[^a-z0-9\s]/g, '').split(/\s+/).filter(w => w.length > 4)
+  );
+  const mtg = item.meeting.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 15);
+  for (const [existingFp, existingId] of Object.entries(idMap)) {
+    if (!existingFp.startsWith(mtg)) continue;
+    if (!existingFp.includes(item.date)) continue;
+    // Count overlapping key words
+    const fpWords = existingFp.split('_').filter(w => w.length > 4);
+    const overlap = fpWords.filter(w => itemWords.has(w)).length;
+    if (overlap >= 2) {
+      // Re-map this fingerprint to the existing ID
+      idMap[fp] = existingId;
+      LS.set('md_idMap', idMap);
+      return existingId;
     }
   }
-  return exact;
+  // New item — assign fresh ID
+  idMap[fp] = fp;
+  LS.set('md_idMap', idMap);
+  return fp;
 }
 function weekKey(ds) {
   const d = new Date(ds+'T00:00:00'), day = d.getDay();
@@ -430,27 +463,16 @@ function buildAllData() {
   state.justDone = new Set();
 
   const persistIds = new Set(state.persistDone.map(p=>p.id));
-  const delegationIds = new Set(Object.keys(state.delegations));
-  const allKnownIds = new Set([...persistIds, ...delegationIds]);
-
   const filtered = state.sourceItems.filter(item => new Date(item.date+'T00:00:00') >= threeMonthsAgo);
+
   for (const item of filtered) {
-    // Find the best matching stable ID for this item
-    const stableId = findMatchingId(item, allKnownIds) || makeId(item);
-
-    // Migrate delegations if ID has changed
-    const rawId = makeId(item);
-    if (rawId !== stableId && state.delegations[rawId] && !state.delegations[stableId]) {
-      state.delegations[stableId] = state.delegations[rawId];
-      delete state.delegations[rawId];
-      save();
-    }
-
-    if (persistIds.has(stableId)) continue;
+    const id = resolveId(item);
+    if (persistIds.has(id)) continue;
     const wk = weekKey(item.date);
     if (!state.allData[wk]) state.allData[wk] = [];
-    state.allData[wk].push({ ...item, id: stableId, category:categorize(item.detail), weekKey:wk });
+    state.allData[wk].push({ ...item, id, category:categorize(item.detail), weekKey:wk });
   }
+
   state.weekKeys = Object.keys(state.allData).sort((a,b)=>b.localeCompare(a));
   if (!state.weekKeys.some(wk=>state.selectedWeeks.has(wk))) {
     state.selectedWeeks = new Set([state.weekKeys[0]||'']);
