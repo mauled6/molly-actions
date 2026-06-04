@@ -498,7 +498,7 @@ async function syncDrive() {
     const fileContents = await Promise.all(
       files.map(async f => {
         const text = await fetchFileContent(f.id, accessToken);
-        return { name: f.name, text: text.slice(0, 3000) };
+        return { name: f.name, text: text.slice(0, 1500) }; // keep each file small
       })
     );
 
@@ -508,8 +508,13 @@ async function syncDrive() {
 
     // Pass existing IDs so Claude can reuse them for items it saw before
     const existingItems = LS.get('md_sourceItems', []);
-    const existingContext = existingItems.length
-      ? `\n\nPREVIOUSLY SEEN ITEMS (reuse these exact stable_id values if the same action appears again — match by meeting + date + core intent, even if wording differs):\n${JSON.stringify(existingItems.map(i=>({stable_id:i.stable_id,date:i.date,meeting:i.meeting,summary:i.detail.slice(0,60)})))}`
+    // Only send stable_id + meeting + date to keep payload small
+    const idLookup = existingItems
+      .filter(i => i.stable_id)
+      .map(i => `${i.stable_id} | ${i.meeting} | ${i.date} | ${i.detail.slice(0,40)}`)
+      .join('\n');
+    const existingContext = idLookup
+      ? `\n\nREUSE THESE stable_ids for matching actions (match by meeting+date+intent):\n${idLookup}`
       : '';
 
     const resp = await fetch('/api/proxy', {
