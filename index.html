@@ -373,62 +373,19 @@ function save() {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 // ─── Stable ID system ────────────────────────────────────────────────────────
-// IDs are assigned once and stored in a lookup table keyed by a fingerprint.
-// The fingerprint uses meeting + date + key words, so minor rewordings still match.
-// This means completions and delegations survive resyncs even if Claude rewords actions.
-
-function fingerprint(item) {
-  // Extract the 3 most distinctive words (length > 4) from the detail
-  const words = item.detail.toLowerCase()
-    .replace(/[^a-z0-9\s]/g, '')
-    .split(/\s+/)
-    .filter(w => w.length > 4)
-    .slice(0, 3)
-    .sort()
-    .join('_');
-  const mtg = item.meeting.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 15);
-  return (mtg + '_' + item.date + '_' + words).slice(0, 80);
-}
+// stable_id is assigned by Claude during sync and stored on each item.
+// Claude is instructed to reuse the same stable_id for the same action across syncs.
+// This makes completions and delegations fully durable across resyncs.
 
 function makeId(item) {
-  // Look up or create a stable ID for this item
-  const fp = fingerprint(item);
-  const idMap = LS.get('md_idMap', {});
-  if (idMap[fp]) return idMap[fp];
-  // Create a new stable ID and store it
-  const newId = fp;
-  idMap[fp] = newId;
-  LS.set('md_idMap', idMap);
-  return newId;
+  // Use Claude-assigned stable_id if present, otherwise generate one
+  if (item.stable_id) return item.stable_id.slice(0, 80);
+  return (item.meeting + '_' + item.date + '_' + item.detail.slice(0, 30))
+    .toLowerCase().replace(/[^a-z0-9]+/g, '_').slice(0, 80);
 }
 
 function resolveId(item) {
-  // Try fingerprint lookup first, then fall back to making a new one
-  const fp = fingerprint(item);
-  const idMap = LS.get('md_idMap', {});
-  if (idMap[fp]) return idMap[fp];
-  // Try to find a close match: same meeting + date + at least 2 words overlap
-  const itemWords = new Set(
-    item.detail.toLowerCase().replace(/[^a-z0-9\s]/g, '').split(/\s+/).filter(w => w.length > 4)
-  );
-  const mtg = item.meeting.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 15);
-  for (const [existingFp, existingId] of Object.entries(idMap)) {
-    if (!existingFp.startsWith(mtg)) continue;
-    if (!existingFp.includes(item.date)) continue;
-    // Count overlapping key words
-    const fpWords = existingFp.split('_').filter(w => w.length > 4);
-    const overlap = fpWords.filter(w => itemWords.has(w)).length;
-    if (overlap >= 2) {
-      // Re-map this fingerprint to the existing ID
-      idMap[fp] = existingId;
-      LS.set('md_idMap', idMap);
-      return existingId;
-    }
-  }
-  // New item — assign fresh ID
-  idMap[fp] = fp;
-  LS.set('md_idMap', idMap);
-  return fp;
+  return makeId(item);
 }
 function weekKey(ds) {
   const d = new Date(ds+'T00:00:00'), day = d.getDay();
@@ -545,9 +502,15 @@ async function syncDrive() {
       })
     );
 
-    // Step 4: Send to Claude to extract action items
+    // Step 4: Send to Claude to extract action items WITH stable IDs
     state.syncMsg = 'Extracting your action items...'; render();
     const combinedText = fileContents.map(f => `=== ${f.name} ===\n${f.text}`).join('\n\n');
+
+    // Pass existing IDs so Claude can reuse them for items it saw before
+    const existingItems = LS.get('md_sourceItems', []);
+    const existingContext = existingItems.length
+      ? `\n\nPREVIOUSLY SEEN ITEMS (reuse these exact stable_id values if the same action appears again — match by meeting + date + core intent, even if wording differs):\n${JSON.stringify(existingItems.map(i=>({stable_id:i.stable_id,date:i.date,meeting:i.meeting,summary:i.detail.slice(0,60)})))}`
+      : '';
 
     const resp = await fetch('/api/proxy', {
       method: 'POST',
@@ -557,9 +520,13 @@ async function syncDrive() {
         max_tokens: 4000,
         system: `You extract action items assigned to Molly Durham from Gemini meeting notes.
 Return ONLY a valid JSON array. No markdown, no explanation, no code fences.
-Each object: {"date":"YYYY-MM-DD","meeting":"Meeting Name","detail":"Full action text as written"}
-Only include items explicitly assigned to Molly Durham. Infer the date from the document name or content.`,
-        messages: [{ role: 'user', content: `Extract all action items assigned to Molly Durham from these meeting notes:\n\n${combinedText}` }]
+Each object must have exactly these fields:
+  "stable_id": a short permanent key like "hw_logistics_2026-05-07_configurator" — use MEETING_SLUG + DATE + 2-3 KEY WORDS from the action. CRITICAL: if this action appeared in previously seen items, reuse the EXACT same stable_id. Never change a stable_id once assigned.
+  "date": "YYYY-MM-DD"
+  "meeting": "Meeting Name"  
+  "detail": "Full action text as written in the notes"
+Only include items explicitly assigned to Molly Durham.`,
+        messages: [{ role: 'user', content: `Extract all action items assigned to Molly Durham from these meeting notes:\n\n${combinedText}${existingContext}` }]
       })
     });
 
@@ -574,6 +541,15 @@ Only include items explicitly assigned to Molly Durham. Infer the date from the 
     if (!match) throw new Error('No action items found in response');
     const items = JSON.parse(match[0]);
     if (!Array.isArray(items) || !items.length) throw new Error('No action items found in your meeting notes');
+
+    // Ensure every item has a stable_id; generate one if missing
+    items.forEach(item => {
+      if (!item.stable_id) {
+        const slug = (item.meeting + '_' + item.date + '_' + item.detail.slice(0,30))
+          .toLowerCase().replace(/[^a-z0-9]+/g, '_').slice(0, 60);
+        item.stable_id = slug;
+      }
+    });
 
     state.sourceItems = items;
     state.lastSync = Date.now();
