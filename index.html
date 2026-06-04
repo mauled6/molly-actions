@@ -498,63 +498,79 @@ async function syncDrive() {
     const fileContents = await Promise.all(
       files.map(async f => {
         const text = await fetchFileContent(f.id, accessToken);
-        return { name: f.name, text: text.slice(0, 1500) }; // keep each file small
+        return { name: f.name, text: text.slice(0, 2500) };
       })
     );
 
-    // Step 4: Send to Claude to extract action items WITH stable IDs
+    // Step 4: Process in batches of 8 files, merge all results
     state.syncMsg = 'Extracting your action items...'; render();
-    const combinedText = fileContents.map(f => `=== ${f.name} ===\n${f.text}`).join('\n\n');
+    const BATCH = 8;
+    let allItems = [];
 
-    // Pass existing IDs so Claude can reuse them for items it saw before
     const existingItems = LS.get('md_sourceItems', []);
-    // Only send stable_id + meeting + date to keep payload small
     const idLookup = existingItems
       .filter(i => i.stable_id)
       .map(i => `${i.stable_id} | ${i.meeting} | ${i.date} | ${i.detail.slice(0,40)}`)
       .join('\n');
     const existingContext = idLookup
-      ? `\n\nREUSE THESE stable_ids for matching actions (match by meeting+date+intent):\n${idLookup}`
+      ? `\n\nREUSE THESE stable_ids for matching actions (same meeting+date+intent):\n${idLookup}`
       : '';
 
-    const resp = await fetch('/api/proxy', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4-5',
-        max_tokens: 4000,
-        system: `You extract action items assigned to Molly Durham from Gemini meeting notes.
+    const systemPrompt = `You extract action items assigned to Molly Durham from Gemini meeting notes.
 Return ONLY a valid JSON array. No markdown, no explanation, no code fences.
 Each object must have exactly these fields:
-  "stable_id": a short permanent key like "hw_logistics_2026-05-07_configurator" — use MEETING_SLUG + DATE + 2-3 KEY WORDS from the action. CRITICAL: if this action appeared in previously seen items, reuse the EXACT same stable_id. Never change a stable_id once assigned.
+  "stable_id": MEETING_SLUG_DATE_KEYWORDS e.g. "hw_logistics_2026-05-07_configurator". CRITICAL: reuse exact stable_id from the provided list if same action. Never change a stable_id once assigned.
   "date": "YYYY-MM-DD"
-  "meeting": "Meeting Name"  
-  "detail": "Full action text as written in the notes"
-Only include items explicitly assigned to Molly Durham.`,
-        messages: [{ role: 'user', content: `Extract all action items assigned to Molly Durham from these meeting notes:\n\n${combinedText}${existingContext}` }]
-      })
-    });
+  "meeting": "Meeting Name"
+  "detail": "Full action text as written in notes"
+Only include items explicitly assigned to [Molly Durham]. Return [] if none found.`;
 
-    if (!resp.ok) {
-      const err = await resp.json().catch(()=>({}));
-      throw new Error(err.error?.message || `API error ${resp.status}`);
+    for (let i = 0; i < fileContents.length; i += BATCH) {
+      const batch = fileContents.slice(i, i + BATCH);
+      const batchText = batch.map(f => `=== ${f.name} ===\n${f.text}`).join('\n\n');
+      state.syncMsg = `Processing notes ${i+1}–${Math.min(i+BATCH, fileContents.length)} of ${fileContents.length}...`; render();
+
+      const resp = await fetch('/api/proxy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
+        body: JSON.stringify({
+          model: 'claude-sonnet-4-5',
+          max_tokens: 2000,
+          system: systemPrompt,
+          messages: [{ role: 'user', content: `Extract action items for Molly Durham:\n\n${batchText}${existingContext}` }]
+        })
+      });
+
+      if (!resp.ok) {
+        const err = await resp.json().catch(()=>({}));
+        throw new Error(err.error?.message || `API error ${resp.status}`);
+      }
+
+      const data = await resp.json();
+      const text = (data.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('');
+      const match = text.match(/\[[\s\S]*\]/);
+      if (match) {
+        try {
+          const batchItems = JSON.parse(match[0]);
+          if (Array.isArray(batchItems)) allItems = allItems.concat(batchItems);
+        } catch(e) {}
+      }
     }
 
-    const data = await resp.json();
-    const text = (data.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('');
-    const match = text.match(/\[[\s\S]*\]/);
-    if (!match) throw new Error('No action items found in response');
-    const items = JSON.parse(match[0]);
-    if (!Array.isArray(items) || !items.length) throw new Error('No action items found in your meeting notes');
+    if (!allItems.length) throw new Error('No action items found in your meeting notes');
 
-    // Ensure every item has a stable_id; generate one if missing
-    items.forEach(item => {
+    // Ensure every item has a stable_id
+    allItems.forEach(item => {
       if (!item.stable_id) {
-        const slug = (item.meeting + '_' + item.date + '_' + item.detail.slice(0,30))
+        item.stable_id = (item.meeting + '_' + item.date + '_' + item.detail.slice(0,30))
           .toLowerCase().replace(/[^a-z0-9]+/g, '_').slice(0, 60);
-        item.stable_id = slug;
       }
     });
+
+    // Deduplicate by stable_id (keep last occurrence)
+    const seen = new Map();
+    allItems.forEach(item => seen.set(item.stable_id, item));
+    const items = [...seen.values()];
 
     state.sourceItems = items;
     state.lastSync = Date.now();
@@ -784,7 +800,9 @@ function weekPickerHtml() {
 }
 
 function renderOpen(visibleItems, openItems, doneSession) {
-  const total = visibleItems.length;
+  const total = visibleItems.length + state.persistDone.filter(p=>
+    state.weekKeys.filter(wk=>state.selectedWeeks.has(wk)).some(wk=>p.weekKey===wk)
+  ).length;
   const doneCount = doneSession.length + state.persistDone.filter(p=>
     state.weekKeys.filter(wk=>state.selectedWeeks.has(wk)).some(wk=>p.weekKey===wk)
   ).length;
