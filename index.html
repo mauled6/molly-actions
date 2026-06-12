@@ -359,16 +359,19 @@ let state = {
   delegations: LS.get('md_delegations', {}),
   persistDone: LS.get('md_persistDone', []),
   sourceItems: FALLBACK,
+  manualItems: LS.get('md_manualItems', []),
   lastSync: LS.get('md_lastSync', null),
-  syncStatus: 'idle', // idle | syncing | ok | error
+  syncStatus: 'idle',
   syncMsg: '',
-  popover: null, // { id, x, y }
+  popover: null,
+  addingManual: false,
   setupMode: !LS.get('md_anthropicKey', '') && !LS.get('md_googleClientId', ''),
 };
 
 function save() {
   LS.set('md_delegations', state.delegations);
   LS.set('md_persistDone', state.persistDone);
+  LS.set('md_manualItems', state.manualItems);
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -420,9 +423,14 @@ function buildAllData() {
   state.justDone = new Set();
 
   const persistIds = new Set(state.persistDone.map(p=>p.id));
-  const filtered = state.sourceItems.filter(item => new Date(item.date+'T00:00:00') >= threeMonthsAgo);
 
-  for (const item of filtered) {
+  // Combine gemini + manual items
+  const allSource = [
+    ...state.sourceItems.filter(item => new Date(item.date+'T00:00:00') >= threeMonthsAgo),
+    ...(state.manualItems || [])
+  ];
+
+  for (const item of allSource) {
     const id = resolveId(item);
     if (persistIds.has(id)) continue;
     const wk = weekKey(item.date);
@@ -516,14 +524,15 @@ async function syncDrive() {
       ? `\n\nREUSE THESE stable_ids for matching actions (same meeting+date+intent):\n${idLookup}`
       : '';
 
-    const systemPrompt = `You extract action items assigned to Molly Durham from Gemini meeting notes.
+    const systemPrompt = `You extract action items from Gemini meeting notes that are explicitly tagged with [Molly Durham].
+STRICT RULE: Only include an action item if the text "[Molly Durham]" appears directly next to it as a tag in the Next Steps or Action Items section. Do NOT infer, guess, or include items where Molly is merely mentioned. If no items are tagged [Molly Durham], return [].
 Return ONLY a valid JSON array. No markdown, no explanation, no code fences.
 Each object must have exactly these fields:
   "stable_id": MEETING_SLUG_DATE_KEYWORDS e.g. "hw_logistics_2026-05-07_configurator". CRITICAL: reuse exact stable_id from the provided list if same action. Never change a stable_id once assigned.
   "date": "YYYY-MM-DD"
   "meeting": "Meeting Name"
-  "detail": "Full action text as written in notes"
-Only include items explicitly assigned to [Molly Durham]. Return [] if none found.`;
+  "detail": "Full action text as written in notes, verbatim"
+  "source": "gemini"`;
 
     for (let i = 0; i < fileContents.length; i += BATCH) {
       const batch = fileContents.slice(i, i + BATCH);
@@ -688,6 +697,30 @@ function saveSettingsModal() {
 }
 
 // ─── Render ──────────────────────────────────────────────────────────────────
+function addManualItem(detail, meeting, date, category) {
+  const item = {
+    detail: detail.trim(),
+    meeting: meeting.trim() || 'Manual',
+    date: date || new Date().toISOString().split('T')[0],
+    source: 'manual',
+    stable_id: ('manual_' + Date.now() + '_' + detail.slice(0,20))
+      .toLowerCase().replace(/[^a-z0-9]+/g,'_').slice(0,60)
+  };
+  if (category) item.category = category;
+  state.manualItems.push(item);
+  save();
+  state.addingManual = false;
+  buildAllData();
+  render();
+}
+
+function deleteManualItem(id) {
+  state.manualItems = state.manualItems.filter(i => resolveId(i) !== id);
+  save();
+  buildAllData();
+  render();
+}
+
 function render() {
   const root = document.getElementById('root');
   if (state.setupMode) { root.innerHTML = renderSetup(); return; }
@@ -754,7 +787,8 @@ function renderApp() {
         <button class="btn-sm ${state.syncStatus==='syncing'?'loading':''}" onclick="syncDrive()">
           ${state.syncStatus==='syncing'?'<div class="spinner"></div>':'↻'} Sync Drive
         </button>
-        <button class="btn-sm primary" onclick="applyRefresh()">↻ Refresh view</button>
+        <button class="btn-sm" onclick="state.addingManual=true;render()">+ Add item</button>
+        <button class="btn-sm primary" onclick="applyRefresh()">✓ Complete → Log</button>
         <button class="btn-sm" onclick="openSettings()" title="Settings">⚙</button>
       </div>
     </div>`;
@@ -776,6 +810,7 @@ function renderApp() {
   else if (state.view === 'delegated') { html += renderDelegated(delegatedItems); }
   else { html += renderOpen(visibleItems, openItems, doneSession); }
 
+  if (state.addingManual) html += renderAddManualModal();
   if (state.popover) html += renderPopover();
 
   html += `<div style="text-align:center;margin-top:16px;"><span class="settings-link" onclick="openSettings()">⚙ API settings</span></div>`;
@@ -865,6 +900,7 @@ function renderOpen(visibleItems, openItems, doneSession) {
 
 function actionCard(item, showWeek, multi) {
   const assignee = state.delegations[item.id];
+  const isManual = item.source === 'manual';
   return `
     <div class="action-card">
       <div class="chk" onclick="checkItem('${item.id}')"></div>
@@ -872,12 +908,14 @@ function actionCard(item, showWeek, multi) {
         <div class="action-text">${item.detail}</div>
         <div class="action-meta">
           <span class="pill">${item.meeting}</span>
+          ${isManual ? `<span class="pill" style="background:var(--info-bg);color:var(--info-text);border-color:var(--info-border);">manual</span>` : ''}
           ${(multi||showWeek)?`<span class="pill week">${weekLabel(item.weekKey)}</span>`:''}
           <span>${item.date}</span>
           ${assignee
             ? `<span class="pill assignee" onclick="event.stopPropagation();openPopover('${item.id}',this)">${initials(assignee)} ${assignee} ✕</span>`
             : `<button class="assign-btn" onclick="event.stopPropagation();openPopover('${item.id}',this)">+ Assign</button>`
           }
+          ${isManual ? `<button class="assign-btn" style="color:#e24b4a;border-color:#e24b4a;margin-left:auto;" onclick="event.stopPropagation();if(confirm('Delete this item?'))deleteManualItem('${item.id}')">✕ Delete</button>` : ''}
         </div>
       </div>
     </div>`;
@@ -938,6 +976,55 @@ function renderLog() {
     </div>`;
   }
   return html;
+}
+
+function renderAddManualModal() {
+  const today = new Date().toISOString().split('T')[0];
+  const cats = Object.keys(CATS);
+  return `
+    <div class="pop-backdrop" onclick="state.addingManual=false;render()"></div>
+    <div style="position:fixed;inset:0;z-index:101;display:flex;align-items:center;justify-content:center;padding:16px;pointer-events:none;">
+      <div style="background:var(--bg);border:0.5px solid var(--border2);border-radius:var(--radius-lg);padding:24px;width:100%;max-width:440px;box-shadow:0 8px 32px rgba(0,0,0,0.12);pointer-events:all;">
+        <h2 style="font-size:15px;font-weight:600;margin-bottom:16px;">Add action item</h2>
+        <div style="margin-bottom:12px;">
+          <label style="display:block;font-size:11px;font-weight:500;color:var(--text2);margin-bottom:5px;">Action <span style="color:#e24b4a">*</span></label>
+          <textarea id="man-detail" rows="3" placeholder="What needs to be done?"
+            style="width:100%;padding:9px 12px;border-radius:var(--radius);border:0.5px solid var(--border2);background:var(--bg2);color:var(--text);font-size:13px;resize:vertical;outline:none;font-family:inherit;"></textarea>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px;">
+          <div>
+            <label style="display:block;font-size:11px;font-weight:500;color:var(--text2);margin-bottom:5px;">Source / Context</label>
+            <input id="man-meeting" placeholder="e.g. Slack, Email, 1x1…"
+              style="width:100%;padding:9px 12px;border-radius:var(--radius);border:0.5px solid var(--border2);background:var(--bg2);color:var(--text);font-size:13px;outline:none;" />
+          </div>
+          <div>
+            <label style="display:block;font-size:11px;font-weight:500;color:var(--text2);margin-bottom:5px;">Date</label>
+            <input id="man-date" type="date" value="${today}"
+              style="width:100%;padding:9px 12px;border-radius:var(--radius);border:0.5px solid var(--border2);background:var(--bg2);color:var(--text);font-size:13px;outline:none;" />
+          </div>
+        </div>
+        <div style="margin-bottom:20px;">
+          <label style="display:block;font-size:11px;font-weight:500;color:var(--text2);margin-bottom:5px;">Category</label>
+          <select id="man-cat"
+            style="width:100%;padding:9px 12px;border-radius:var(--radius);border:0.5px solid var(--border2);background:var(--bg2);color:var(--text);font-size:13px;outline:none;">
+            ${cats.map(c=>`<option value="${c}">${c}</option>`).join('')}
+          </select>
+        </div>
+        <div style="display:flex;gap:8px;">
+          <button onclick="
+            const d=document.getElementById('man-detail').value.trim();
+            if(!d){alert('Please enter an action item.');return;}
+            addManualItem(d, document.getElementById('man-meeting').value, document.getElementById('man-date').value, document.getElementById('man-cat').value);"
+            style="flex:1;padding:10px;border-radius:var(--radius);background:var(--text);color:var(--bg);border:none;font-size:14px;font-weight:500;cursor:pointer;">
+            Add item
+          </button>
+          <button onclick="state.addingManual=false;render()"
+            style="padding:10px 16px;border-radius:var(--radius);background:var(--bg2);color:var(--text);border:0.5px solid var(--border2);font-size:14px;cursor:pointer;">
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>`;
 }
 
 function renderPopover() {
