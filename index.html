@@ -469,7 +469,7 @@ function signInWithGoogle() {
 
 async function fetchDriveFiles(accessToken) {
   const cutoff = threeMonthsAgo.toISOString().split('T')[0];
-  const q = encodeURIComponent(`name contains 'Notes by Gemini' and modifiedTime > '${cutoff}T00:00:00Z' and mimeType = 'application/vnd.google-apps.document'`);
+  const q = encodeURIComponent(`name contains 'Notes by Gemini' and fullText contains 'Molly Durham' and modifiedTime > '${cutoff}T00:00:00Z' and mimeType = 'application/vnd.google-apps.document'`);
   const url = `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name,modifiedTime)&pageSize=50`;
   const resp = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
   if (!resp.ok) throw new Error(`Drive API error: ${resp.status}`);
@@ -506,7 +506,17 @@ async function syncDrive() {
     const fileContents = await Promise.all(
       files.map(async f => {
         const text = await fetchFileContent(f.id, accessToken);
-        return { name: f.name, text: text.slice(0, 2500) };
+        // Skip to the Next Steps / Action Items section to avoid wasting tokens on preamble
+        const lower = text.toLowerCase();
+        const sectionIdx = Math.max(
+          lower.indexOf('next step'),
+          lower.indexOf('action item'),
+          lower.indexOf('follow-up'),
+          lower.indexOf('follow up'),
+          lower.indexOf('[molly')
+        );
+        const relevant = sectionIdx > 0 ? text.slice(Math.max(0, sectionIdx - 200)) : text;
+        return { name: f.name, text: relevant.slice(0, 4000) };
       })
     );
 
