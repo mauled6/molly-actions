@@ -416,7 +416,7 @@ function fmtTime(ts) {
   return fmtDate(ts);
 }
 
-const threeMonthsAgo = (() => { const d = new Date('2026-05-07'); d.setMonth(d.getMonth()-3); return d; })();
+const threeMonthsAgo = (() => { const d = new Date(); d.setMonth(d.getMonth()-3); return d; })();
 
 function buildAllData() {
   state.allData = {};
